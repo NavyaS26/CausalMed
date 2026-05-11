@@ -1,0 +1,10 @@
+.env
+venv/
+__pycache__/
+*.pyc
+outputs/
+human_genes.txt
+biobert_cred_finetuned/
+*.bin
+*.safetensors
+*.zip

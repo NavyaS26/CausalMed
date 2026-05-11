@@ -1,0 +1,14 @@
+langgraph
+langchain
+langchain-groq
+transformers
+torch
+biopython
+requests
+chromadb
+networkx
+pyvis
+streamlit
+python-dotenv
+pandas
+scikit-learn
