@@ -9,6 +9,7 @@ import os
 from groq import Groq
 from state import PipelineState
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -17,20 +18,25 @@ MODEL  = "llama-3.1-8b-instant"
 
 def call_llm(system_prompt: str, user_prompt: str) -> str:
     """Call Groq Llama-3 and return response text."""
-    try:
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user",   "content": user_prompt}
-            ],
-            max_tokens=300,
-            temperature=0.3
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"[Analyst-Critic] LLM error: {e}")
-        return ""
+    for attempt in range(3):  # retry up to 3 times
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_prompt}
+                ],
+                max_tokens=200,  # reduced from 300
+                temperature=0.3
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            if "429" in str(e):
+                time.sleep(3)  # wait 3 seconds and retry
+                continue
+            print(f"[Analyst-Critic] LLM error: {e}")
+            return ""
+    return ""
 
 
 def analyst_reasoning(relation: dict) -> str:
