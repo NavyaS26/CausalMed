@@ -92,7 +92,7 @@ pip install -r requirements.txt
 pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_ner_bc5cdr_md-0.5.4.tar.gz
 
 # 5. Set up environment variables
-cp .env.example .env
+cp  .env
 # Edit .env and add your API keys
 ```
 
@@ -106,6 +106,7 @@ All other APIs (PubMed, ClinVar, ClinicalTrials.gov, ChEMBL, MyGene.info) requir
 
 ### Download Fine-tuned Model
 
+Download the model from this drive and place it in the folder: https://drive.google.com/drive/folders/101YZ1cDdzX84mxKenBfp2hnnzHxPCLz9?usp=sharing
 Place the `biobert_cred_finetuned/` folder in the project root. It should contain:
 ```
 biobert_cred_finetuned/
