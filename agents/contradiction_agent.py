@@ -1,68 +1,38 @@
-# agents/contradiction_agent.py
-# P's work — Agent 7
-# Scans all validated relations and flags contradictions.
-# A contradiction is when one paper says Gene X CAUSES Disease Y
-# and another paper's sentence suggests it does NOT.
-# Uses simple keyword-based contradiction detection.
-
+import re
 from state import PipelineState
 
-# Keywords that suggest a non-causal or contradictory relationship
-CONTRADICTION_KEYWORDS = [
-    "no significant", "not associated", "no association",
-    "failed to show", "did not cause", "no evidence",
-    "not causal", "not linked", "no causal", "contrary",
-    "inconsistent", "disputed", "controversial", "unclear",
-    "no direct", "not directly", "without evidence"
-]
-
-# Keywords that strongly suggest causality
-CAUSAL_KEYWORDS = [
-    "causes", "leads to", "results in", "drives", "induces",
-    "promotes", "triggers", "contributes to", "responsible for",
-    "directly causes", "causally linked", "causal role"
-]
-
-
-def check_contradiction(gene: str, disease: str, papers: list) -> list:
-    """
-    Check if any paper in the corpus contradicts a causal gene-disease link.
-    Returns list of contradicting paper IDs.
-    """
-    contradicting_papers = []
-    gene_lower    = gene.lower()
-    disease_lower = disease.lower()
-
+def find_conflicts(gene: str, disease: str, source_paper_id: str, papers: list, original_gene: str = "") -> list:
+    names = {name for name in (gene, original_gene) if name}
+    if not names or not disease:
+        return []
+    gene_term = r"(?<!\w)(?:" + "|".join(re.escape(name) for name in sorted(names)) + r")(?!\w)"
+    disease_term = r"(?<!\w)" + re.escape(disease) + r"(?!\w)"
+    subject = gene_term + r"(?:\s+(?:mutations?|variants?|expression|loss|deficiency))?"
+    denial = r"(?:did|does|do)\s+not\s+(?:directly\s+)?cause|(?:is|was|are|were)\s+not\s+(?:a\s+cause\s+of|responsible\s+for)"
+    between = r"no\s+(?:direct\s+)?causal\s+(?:link|relationship|association)\s+between\s+"
+    patterns = [
+        re.compile(subject + r"\s+(?:" + denial + r")\s+" + disease_term, re.I),
+        re.compile(between + gene_term + r"\s+and\s+" + disease_term, re.I),
+        re.compile(between + disease_term + r"\s+and\s+" + gene_term, re.I),
+    ]
+    conflicts = []
     for paper in papers:
-        abstract = paper.get("abstract", "").lower()
-        pmid     = paper.get("pmid", "")
-
-        # Check if this paper mentions both gene and disease
-        if gene_lower not in abstract or disease_lower not in abstract:
+        pmid = paper.get("pmid")
+        if not pmid or pmid == source_paper_id:
             continue
+        for sentence in re.split(r"(?<=[.!?])\s+", paper.get("abstract", "")):
+            if any(pattern.search(sentence) for pattern in patterns):
+                conflicts.append({"paper_id": pmid, "sentence": sentence.strip()})
+    return conflicts
 
-        # Check for contradiction keywords near gene and disease mentions
-        for keyword in CONTRADICTION_KEYWORDS:
-            if keyword in abstract:
-                # Find sentences containing both gene, disease, and contradiction keyword
-                sentences = abstract.split('.')
-                for sentence in sentences:
-                    if (gene_lower in sentence and
-                            disease_lower in sentence and
-                            keyword in sentence):
-                        contradicting_papers.append(pmid)
-                        break
 
-    return list(set(contradicting_papers))
+def check_contradiction(gene: str, disease: str, source_paper_id: str, papers: list, original_gene: str = "") -> list:
+    conflicts = find_conflicts(gene, disease, source_paper_id, papers, original_gene)
+    return sorted({entry["paper_id"] for entry in conflicts})
 
 
 def contradiction_agent(state: PipelineState) -> PipelineState:
-    """
-    LangGraph node function.
-    Input:  state["validated_relations"] + state["papers"]
-    Output: state["validated_relations"] with contradictions flagged
-    """
-    relations = state.get("validated_relations", [])
+    relations = state.get("causal_relations", [])
     papers    = state.get("papers", [])
 
     if not relations:
@@ -70,25 +40,28 @@ def contradiction_agent(state: PipelineState) -> PipelineState:
         return state
 
     print(f"[Contradiction Agent] Checking {len(relations)} relations for contradictions...")
-
     contradicted_count = 0
 
-    for i, rel in enumerate(relations):
-        gene    = rel.get("gene", "")
-        disease = rel.get("disease", "")
+    for rel in relations:
+        if rel.get("causal_label") != "causal":
+            continue
+        original_gene   = rel.get("gene", "")
+        gene            = rel.get("gene_symbol") or original_gene
+        disease         = rel.get("disease", "")
+        source_paper_id = rel.get("paper_id", "")
 
         if not gene or not disease:
             continue
 
-        contradictions = check_contradiction(gene, disease, papers)
+        conflicts = find_conflicts(gene, disease, source_paper_id, papers, original_gene)
+        rel["conflict_evidence"] = conflicts
+        contradictions = sorted({entry["paper_id"] for entry in conflicts})
+        rel["contradictions"] = contradictions
 
         if contradictions:
-            relations[i]["contradictions"]  = contradictions
-            relations[i]["classification"]  = "contradicted"
             contradicted_count += 1
-            print(f"  CONTRADICTED: {gene} → {disease} "
-                  f"(by papers: {contradictions})")
+            print(f"  CONTRADICTED: {gene} → {disease} (by papers: {contradictions})")
 
     print(f"[Contradiction Agent] Found {contradicted_count} contradicted relations")
-    state["validated_relations"] = relations
+    state["causal_relations"] = relations
     return state

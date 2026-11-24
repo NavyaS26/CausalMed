@@ -1,53 +1,51 @@
-# state.py
-# Shared state object that gets passed between all agents in the pipeline.
-# Every agent reads from this and writes back to it.
+from typing import TypedDict, List, Dict, Any
 
-from typing import TypedDict, List, Optional, Dict, Any
 
 class CausalRelation(TypedDict):
-    gene: str
-    gene_id: str                  # normalized via MyGene.info
-    disease: str
-    sentence: str                 # source sentence from paper
-    paper_id: str                 # PubMed ID
-    causal_label: str             # "causal" or "non-causal"
-    confidence: float             # 0.0 to 1.0 from causal reasoning agent
-    analyst_reasoning: str        # analyst agent explanation
-    critic_feedback: str          # critic agent feedback
-    validated: bool               # did DisGeNET confirm this?
-    disgenet_score: float         # DisGeNET association score
-    classification: str           # "validated" | "novel_hypothesis" | "contradicted"
-    contradictions: List[str]     # list of paper IDs that dispute this link
-    clinical_trials: List[str]    # active trial IDs from ClinicalTrials.gov
-    drug_candidates: List[str]    # drugs from ChEMBL targeting this gene
-    chain: List[Dict]             # multi-hop chain hops
+    gene:                  str
+    gene_symbol:           str
+    gene_id:               str
+    ensembl_id:            str
+    disease:               str
+    sentence:              str
+    paper_id:              str
+    causal_label:          str
+    confidence:            float | None
+    biobert_label:         str
+    biobert_confidence:    float
+    evidence_checklist:    Dict
+    critic_score:          float
+    analyst_reasoning:     str
+    critic_feedback:       str
+    needs_review:          bool
+    review_reason:         str
+    combined_score:        float | None
+    evidence_tier:         str
+    evidence_tier_label:   str
+    validated:             bool
+    clinvar_score:         float | None
+    claim_quote:           str
+    clinvar_record_count:  int | None
+    clinvar_status:        str
+    classification:        str
+    contradictions:        List[str]
+    conflict_evidence:     List[Dict]
+    evidence_papers:       List[str]
+    clinical_trials:       List[str]
+    drug_candidates:       List[str]
+    reliability_score:     float | None
+    evidence_count:        int
+    chain:                 List[Dict]
 
 
 class PipelineState(TypedDict):
-    # Input
-    user_query: str               # e.g. "TP53 and lung cancer"
-
-    # After ingestion
-    papers: List[Dict]            # list of {pmid, title, abstract, full_text}
-
-    # After NER
-    entities: List[Dict]          # list of {gene, disease, sentence, paper_id}
-
-    # After normalization
-    normalized_entities: List[Dict]
-
-    # After causal reasoning + analyst-critic
-    causal_relations: List[CausalRelation]
-
-    # After chain assembly
-    chains: List[Dict]
-
-    # After validation
-    validated_relations: List[CausalRelation]
-
-    # Final
-    final_output: Dict[str, Any]
-
-    # Control flags
-    analyst_critic_iterations: int   # tracks how many loops have happened
-    max_iterations: int              # cap at 3 to avoid infinite loops
+    user_query:                str
+    papers:                    List[Dict]
+    entities:                  List[Dict]
+    normalized_entities:       List[Dict]
+    causal_relations:          List[CausalRelation]
+    chains:                    List[Dict]
+    validated_relations:       List[CausalRelation]
+    final_output:              Dict[str, Any]
+    analyst_critic_iterations: int
+    max_iterations:            int

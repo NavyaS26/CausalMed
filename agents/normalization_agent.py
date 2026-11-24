@@ -1,43 +1,104 @@
 # agents/normalization_agent.py
-# R's work — Agent 3 (runs after NER)
-# Converts gene names to standard IDs using MyGene.info free API.
-# This is critical before querying any biological database.
+# R's work — Agent 3
+#
+# FIX: Removed MyGene score threshold entirely.
+# Accept normalization ONLY if:
+#   returned_symbol == input (exact match)
+#   OR input appears in MyGene's documented alias list
+# No score threshold — high confidence ≠ correct identity for normalization.
+# This prevents PC9→PCSK9, HCC→HYCC1, HBP→STAM2 wrong mappings.
 
 import requests
 from state import PipelineState
 
+_DEBUG_LOGGED = False
 
-def normalize_gene(gene_name: str) -> dict:
+
+def is_valid_mapping(input_name: str, hit: dict) -> bool:
     """
-    Query MyGene.info to get standard IDs for a gene name.
-    Returns dict with entrez_id, ensembl_id, symbol.
-    Falls back to original name if not found.
+    Validates whether a MyGene mapping is trustworthy.
+
+    Accepts ONLY:
+    - Returned symbol exactly matches input (case-insensitive)
+    - Input appears in the gene's documented alias list from MyGene
+
+    No score threshold — MyGene confidence score does not guarantee
+    correct identity for biomedical normalization.
+    PC9 scores high for PCSK9 because it's the closest match,
+    not because PC9 IS PCSK9.
     """
-    try:
-        url    = f"https://mygene.info/v3/query"
-        params = {
-            "q":      gene_name,
-            "fields": "entrezgene,ensembl.gene,symbol,name",
-            "size":   1,
-            "species": "human"
-        }
-        response = requests.get(url, params=params, timeout=5)
-        response.raise_for_status()
-        data = response.json()
+    if not hit or not isinstance(hit, dict):
+        return False
 
-        if data.get("hits"):
-            hit = data["hits"][0]
-            return {
-                "original_name": gene_name,
-                "symbol":        hit.get("symbol", gene_name),
-                "entrez_id":     str(hit.get("entrezgene", "")),
-                "ensembl_id":    hit.get("ensembl", {}).get("gene", "") if isinstance(hit.get("ensembl"), dict) else "",
-                "normalized":    True
-            }
-    except Exception as e:
-        print(f"[Normalization] Could not normalize {gene_name}: {e}")
+    returned_symbol = hit.get("symbol", "").upper()
+    input_upper     = input_name.upper()
 
-    # Fallback — return original name if API fails
+    # Rule 1: Exact symbol match
+    if returned_symbol == input_upper:
+        return True
+
+    # Rule 2: Input is a documented alias
+    aliases = hit.get("alias", [])
+    if isinstance(aliases, str):
+        aliases = [aliases]
+    if input_upper in [a.upper() for a in aliases]:
+        return True
+
+    # Reject everything else
+    return False
+
+
+def normalize_genes_batch(gene_names: list) -> dict:
+    """
+    GET per gene — batch POST response order is unreliable.
+    Only accepts exact match or documented alias.
+    """
+    if not gene_names:
+        return {}
+
+    results = {}
+
+    for gene_name in gene_names:
+        try:
+            r = requests.get(
+                "https://mygene.info/v3/query",
+                params={
+                    "q":       gene_name,
+                    "fields":  "entrezgene,ensembl.gene,symbol,name,alias",
+                    "species": "human",
+                    "scopes":  "symbol,alias",
+                    "size":    1
+                },
+                timeout=10
+            )
+            r.raise_for_status()
+            hits = r.json().get("hits", [])
+            if hits and isinstance(hits[0], dict):
+                hit = hits[0]
+                if is_valid_mapping(gene_name, hit):
+                    ensembl = hit.get("ensembl", {})
+                    results[gene_name] = {
+                        "original_name": gene_name,
+                        "symbol":        hit.get("symbol", gene_name),
+                        "entrez_id":     str(hit.get("entrezgene", "")),
+                        "ensembl_id":    ensembl.get("gene", "")
+                                         if isinstance(ensembl, dict) else "",
+                        "normalized":    True
+                    }
+                    print(f"  [Normalization] ✓ {gene_name} → {hit.get('symbol', gene_name)}")
+                else:
+                    print(f"  [Normalization] ✗ Rejected: "
+                          f"{gene_name} → {hit.get('symbol', '?')} — keeping original")
+                    results[gene_name] = _fallback(gene_name)
+            else:
+                results[gene_name] = _fallback(gene_name)
+        except Exception as e:
+            print(f"  [Normalization] Error for {gene_name}: {e}")
+            results[gene_name] = _fallback(gene_name)
+
+    return results
+
+def _fallback(gene_name: str) -> dict:
     return {
         "original_name": gene_name,
         "symbol":        gene_name,
@@ -48,42 +109,31 @@ def normalize_gene(gene_name: str) -> dict:
 
 
 def normalization_agent(state: PipelineState) -> PipelineState:
-    """
-    LangGraph node function.
-    Input:  state["entities"]            — raw NER output
-    Output: state["normalized_entities"] — entities with standard gene IDs added
-    """
     entities = state.get("entities", [])
-
     if not entities:
         print("[Normalization Agent] No entities to normalize.")
         state["normalized_entities"] = []
         return state
 
-    print(f"[Normalization Agent] Normalizing {len(entities)} entities...")
+    unique_genes = list({e.get("gene", "") for e in entities if e.get("gene")})
+    print(f"[Normalization Agent] Normalizing {len(unique_genes)} unique genes "
+          f"across {len(entities)} entities...")
 
-    # Cache to avoid calling API multiple times for same gene
-    cache = {}
+    cache = normalize_genes_batch(unique_genes)
+
     normalized = []
-
     for entity in entities:
-        gene = entity.get("gene", "")
-
-        if gene not in cache:
-            cache[gene] = normalize_gene(gene)
-
-        gene_info = cache[gene]
-
+        gene      = entity.get("gene", "")
+        gene_info = cache.get(gene) or _fallback(gene)
         normalized.append({
             **entity,
-            "gene_symbol":  gene_info["symbol"],
-            "gene_id":      gene_info["entrez_id"],
-            "ensembl_id":   gene_info["ensembl_id"],
-            "normalized":   gene_info["normalized"]
+            "gene_symbol": gene_info["symbol"],
+            "gene_id":     gene_info["entrez_id"],
+            "ensembl_id":  gene_info["ensembl_id"],
+            "normalized":  gene_info["normalized"]
         })
 
-    normalized_count = sum(1 for e in normalized if e["normalized"])
-    print(f"[Normalization Agent] Successfully normalized {normalized_count}/{len(entities)} entities")
-
+    norm_count = sum(1 for e in normalized if e["normalized"])
+    print(f"[Normalization Agent] Normalized {norm_count}/{len(entities)} entities")
     state["normalized_entities"] = normalized
     return state

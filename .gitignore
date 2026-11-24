@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 outputs/
 human_genes.txt
+mesh_data/
 biobert_cred_finetuned/
 *.bin
 *.safetensors

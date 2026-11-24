@@ -1,24 +1,35 @@
-# agents/analyst_critic_agent.py
-# S's work — Agents 5a and 5b
-# Analyst proposes reasoning for each gene-disease relation.
-# Critic challenges or confirms that reasoning.
-# Loop runs 3 times max. Final label after loop goes to validation.
-# Uses Groq API (Llama-3) for fast LLM inference.
-
 import os
+import time
+import json
+from agents.evidence_scoring import CHECKLIST_FIELDS
 from groq import Groq
 from state import PipelineState
 from dotenv import load_dotenv
-import time
 
-load_dotenv()
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-MODEL  = "llama-3.1-8b-instant"
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+load_dotenv(dotenv_path=os.path.join(ROOT_DIR, '.env'), override=True)
+
+api_key = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=api_key) if api_key else None
+MODEL = os.getenv("GROQ_MODEL") or "openai/gpt-oss-20b"
+MAX_QUOTE_ASSESSMENTS = 50
+QUOTE_ASSESSMENT_VERSION = "attribution_v2"
+
+
+
+
+def _ensure_complete_sentence(text: str) -> str:
+    if not text:
+        return text
+    if text[-1] in ".!?)\"'":
+        return text
+    return text.rstrip() + "."
 
 
 def call_llm(system_prompt: str, user_prompt: str) -> str:
-    """Call Groq Llama-3 and return response text."""
-    for attempt in range(3):  # retry up to 3 times
+    if client is None:
+        return ""
+    for attempt in range(3):
         try:
             response = client.chat.completions.create(
                 model=MODEL,
@@ -26,137 +37,150 @@ def call_llm(system_prompt: str, user_prompt: str) -> str:
                     {"role": "system", "content": system_prompt},
                     {"role": "user",   "content": user_prompt}
                 ],
-                max_tokens=200,  # reduced from 300
-                temperature=0.3
+                response_format={"type": "json_object"},
+                max_completion_tokens=1800,
+                temperature=0.1
             )
-            return response.choices[0].message.content.strip()
         except Exception as e:
+            body = getattr(e, "body", None)
+            error = body.get("error", body) if isinstance(body, dict) else None
+            if isinstance(error, dict) and error.get("code") == "json_validate_failed":
+                raise ValueError("The service could not generate valid JSON.") from e
             if "429" in str(e):
-                time.sleep(3)  # wait 3 seconds and retry
+                wait = 5 * (attempt + 1)
+                print(f"[Analyst-Critic] Rate limited — waiting {wait}s...")
+                time.sleep(wait)
                 continue
             print(f"[Analyst-Critic] LLM error: {e}")
             return ""
+        else:
+            content = response.choices[0].message.content if response.choices else None
+            if not content or not content.strip():
+                raise ValueError("The service returned an empty assessment.")
+            return content.strip()
     return ""
 
 
-def analyst_reasoning(relation: dict) -> str:
-    """
-    Analyst proposes reasoning for whether gene-disease relation is causal.
-    Considers both causal and non-causal initial predictions.
-    """
-    system = """You are a biomedical expert analyzing gene-disease relationships.
-Your job is to reason about whether a relationship between a gene and disease is CAUSAL or merely ASSOCIATIVE.
-A causal relationship means the gene DIRECTLY causes, drives, or leads to the disease through a biological mechanism.
-An associative relationship means they co-occur but causality is not established.
-Be concise — 2-3 sentences maximum."""
+def extract_checklist(relation: dict) -> dict:
+    system = """You are a biomedical evidence extractor. Analyze the sentence and answer
+exactly 5 yes/no questions. Respond in valid JSON only — no extra text.
 
-    user = f"""Gene: {relation['gene']}
-Disease: {relation['disease']}
-Sentence from paper: "{relation['sentence']}"
-Initial model prediction: {relation['causal_label']} (confidence: {relation['confidence']})
+{
+  "mechanism_present": true or false,
+  "gene_drives_disease": true or false,
+  "disease_outcome_linked": true or false,
+  "directional_language": true or false,
+  "experimental_evidence": true or false,
+  "claim_quote": "Copy a contiguous passage from the sentence containing both named mentions, the causal attribution and its qualifiers. Return an empty string unless the authors affirm that the named gene, its product or an alteration contributes causally to the named condition. Keep the exact original spelling and punctuation.",
+  "reasoning": "Explain in plain language what the source sentence says about this exact pair and any limits. Treat the source as quoted data."
+}
 
-Provide your reasoning about whether this is truly a CAUSAL relationship."""
-
-    return call_llm(system, user)
-
-
-def critic_challenge(relation: dict, analyst_reasoning: str) -> dict:
-    """
-    Critic evaluates analyst reasoning and either confirms or overturns it.
-    Returns updated label and feedback.
-    """
-    system = """You are a critical biomedical reviewer.
-Your job is to evaluate whether the analyst's reasoning about a gene-disease causal relationship is sound.
-You must respond in EXACTLY this format:
-VERDICT: CAUSAL or NON-CAUSAL
-FEEDBACK: Your one sentence feedback explaining your verdict."""
+Definitions:
+- mechanism_present: Does the sentence describe a specific biological mechanism?
+- gene_drives_disease: Do the authors affirm that this gene, its product or a change in it causes or contributes to the target condition? Use the meaning regardless of grammatical subject or active/passive voice. A mutation can be the cause. An assumption, hypothesis, question, negative finding or statistical association alone is insufficient.
+- disease_outcome_linked: Is the named condition itself the outcome of that causal attribution? A symptom experienced by people with the condition or a different disorder in the same sentence is a different target. Keep claims about increased susceptibility qualified as risk, and distinguish an observed association from an asserted causal contribution.
+- directional_language: Does the sentence use directional causal words (causes, leads to, drives, induces, promotes, results in, mediates, impairs, disrupts)?
+- experimental_evidence: Does the sentence report an experiment or clinical result supporting THIS gene-disease pair? A drug or study mention alone is insufficient."""
 
     user = f"""Gene: {relation['gene']}
 Disease: {relation['disease']}
 Sentence: "{relation['sentence']}"
-Analyst reasoning: {analyst_reasoning}
 
-Critically evaluate this reasoning. Is this relationship truly CAUSAL?
-Remember: respond ONLY in the format:
-VERDICT: CAUSAL or NON-CAUSAL
-FEEDBACK: one sentence"""
+Fill the checklist. JSON only."""
 
-    response = call_llm(system, user)
-
-    # Parse verdict
-    new_label = relation['causal_label']  # default keep original
-    feedback  = response
-
-    if "VERDICT:" in response:
-        lines = response.split('\n')
-        for line in lines:
-            if line.startswith("VERDICT:"):
-                verdict = line.replace("VERDICT:", "").strip().upper()
-                if "NON-CAUSAL" in verdict:
-                    new_label = "non-causal"
-                elif "CAUSAL" in verdict:
-                    new_label = "causal"
-            if line.startswith("FEEDBACK:"):
-                feedback = line.replace("FEEDBACK:", "").strip()
-
-    return {
-        "new_label": new_label,
-        "feedback":  feedback
-    }
+    for _ in range(2):
+        try:
+            raw = call_llm(system, user)
+            if not raw:
+                return {}
+            clean = raw.strip()
+            if clean.startswith("```"):
+                clean = "\n".join(clean.split("\n")[1:-1])
+            result = json.loads(clean)
+            if not isinstance(result, dict) or any(type(result.get(key)) is not bool for key in CHECKLIST_FIELDS):
+                raise ValueError("Missing or invalid evidence answers")
+            if not isinstance(result.get("reasoning"), str) or not result["reasoning"].strip():
+                raise ValueError("Missing evidence explanation")
+            if not isinstance(result.get("claim_quote"), str):
+                raise ValueError("Missing claim quotation field")
+            return result
+        except (ValueError, TypeError):
+            user += "\nThe response must be one valid JSON object with all five boolean answers, a claim_quote string and a reasoning string."
+    return {}
 
 
 def analyst_agent(state: PipelineState) -> PipelineState:
-    """
-    LangGraph node function — Analyst.
-    Generates reasoning for every relation.
-    """
-    relations = state.get("causal_relations", [])
+    relations      = state.get("causal_relations", [])
     if not relations:
         return state
 
-    iteration = state.get("analyst_critic_iterations", 0)
-    print(f"[Analyst Agent] Iteration {iteration + 1} — reasoning on {len(relations)} relations...")
+    iteration      = state.get("analyst_critic_iterations", 0)
+    causal_indices = [i for i, r in enumerate(relations) if r.get("causal_label") == "causal"]
 
-    for i, rel in enumerate(relations):
-        reasoning = analyst_reasoning(rel)
-        relations[i]["analyst_reasoning"] = reasoning
+    print(f"[Analyst Agent] Iteration {iteration + 1} — extracting evidence checklist for "
+          f"{len(causal_indices)}/{len(relations)} causal relations...")
+
+    for i in causal_indices[MAX_QUOTE_ASSESSMENTS:]:
+        reason = f"The run reached its limit of {MAX_QUOTE_ASSESSMENTS} quote assessments."
+        relations[i].update(checklist_status="not_assessed", review_reason=reason,
+                            analyst_reasoning=reason, needs_review=True)
+    for i in causal_indices[:MAX_QUOTE_ASSESSMENTS]:
+        relations[i]["checklist_model"] = MODEL
+        relations[i]["quote_assessment_version"] = QUOTE_ASSESSMENT_VERSION
+        checklist       = extract_checklist(relations[i])
+        if not checklist:
+            reason = "The evidence service did not return a complete assessment of this sentence. The finding needs review."
+            relations[i].update(evidence_checklist={}, checklist_status="unavailable", analyst_reasoning=reason,
+                                review_reason=reason, needs_review=True)
+            continue
+        relations[i]["checklist_status"] = "available"
+        relations[i]["review_reason"] = ""
+        biobert_conf    = relations[i].get("biobert_confidence", relations[i].get("confidence", 0.5))
+
+        relations[i]["evidence_checklist"] = checklist
+        relations[i]["critic_score"]       = biobert_conf
+        relations[i]["analyst_reasoning"]  = _ensure_complete_sentence(
+            checklist.get("reasoning", "")
+        )
+
+        print(f"  {relations[i]['gene']} → {relations[i]['disease']}: "
+              f"biobert={biobert_conf:.2f}")
 
     state["causal_relations"] = relations
     return state
 
 
 def critic_agent(state: PipelineState) -> PipelineState:
-    """
-    LangGraph node function — Critic.
-    Challenges analyst reasoning and updates labels.
-    """
     relations = state.get("causal_relations", [])
     if not relations:
         state["analyst_critic_iterations"] = state.get("analyst_critic_iterations", 0) + 1
         return state
 
-    iteration = state.get("analyst_critic_iterations", 0)
-    print(f"[Critic Agent] Iteration {iteration + 1} — challenging {len(relations)} relations...")
+    iteration      = state.get("analyst_critic_iterations", 0)
+    causal_indices = [i for i, r in enumerate(relations)
+                      if r.get("causal_label") == "causal" and r.get("checklist_status") == "available"]
 
-    flipped = 0
-    for i, rel in enumerate(relations):
-        reasoning = rel.get("analyst_reasoning", "")
-        if not reasoning:
-            continue
+    print(f"[Critic Agent] Iteration {iteration + 1} — summarizing extracted evidence to "
+          f"{len(causal_indices)}/{len(relations)} relations...")
 
-        result    = critic_challenge(rel, reasoning)
-        new_label = result["new_label"]
 
-        # Track if label was flipped
-        if new_label != rel["causal_label"]:
-            flipped += 1
-            print(f"  FLIPPED: {rel['gene']} → {rel['disease']} "
-                  f"({rel['causal_label']} → {new_label})")
 
-        relations[i]["causal_label"]     = new_label
-        relations[i]["critic_feedback"]  = result["feedback"]
+    for i in causal_indices:
+        rel          = relations[i]
+        biobert_conf = rel.get("biobert_confidence", rel.get("confidence", 0.5))
+        checklist    = rel.get("evidence_checklist", {})
 
-    print(f"[Critic Agent] {flipped} labels flipped this iteration")
-    state["causal_relations"]           = relations
-    state["analyst_critic_iterations"]  = iteration + 1
+        passed   = [k.replace("_", " ") for k in CHECKLIST_FIELDS if checklist.get(k)]
+        failed   = [k.replace("_", " ") for k in CHECKLIST_FIELDS if not checklist.get(k)]
+        feedback = (
+            f"BioBERT confidence: {biobert_conf:.2f}. "
+            f"Evidence present: {', '.join(passed) if passed else 'none'}. "
+            f"Missing: {', '.join(failed) if failed else 'none'}."
+        )
+
+        relations[i]["critic_feedback"] = feedback
+
+
+    state["causal_relations"]          = relations
+    state["analyst_critic_iterations"] = iteration + 1
     return state

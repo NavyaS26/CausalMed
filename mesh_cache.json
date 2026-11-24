@@ -1,0 +1,164 @@
+{
+  "tumors": {
+    "exists": true,
+    "mesh_id": "68066066",
+    "mesh_label": "Response Evaluation Criteria in Solid Tumors",
+    "tree_numbers": []
+  },
+  "castration-resistant prostate cancer": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "lung adenocarcinoma": {
+    "exists": true,
+    "mesh_id": "67557041",
+    "mesh_label": "MALAT1 long non-coding RNA, human",
+    "tree_numbers": []
+  },
+  "brcaness": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "aml": {
+    "exists": true,
+    "mesh_id": "68050677",
+    "mesh_label": "Core Binding Factor Alpha 3 Subunit",
+    "tree_numbers": []
+  },
+  "germline brca1/2": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "cancers": {
+    "exists": true,
+    "mesh_id": "68065646",
+    "mesh_label": "Thyroid Carcinoma, Anaplastic",
+    "tree_numbers": []
+  },
+  "kras-mutant": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "hepatocellular carcinoma": {
+    "exists": true,
+    "mesh_id": "68006528",
+    "mesh_label": "Carcinoma, Hepatocellular",
+    "tree_numbers": []
+  },
+  "hr-proficient mcf7": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "hormone-sensitive disease": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "prostate cancer": {
+    "exists": true,
+    "mesh_id": "68011471",
+    "mesh_label": "Prostatic Neoplasms",
+    "tree_numbers": []
+  },
+  "hr-proficient tumors": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "mcrpc": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "breast cancer": {
+    "exists": true,
+    "mesh_id": "68064726",
+    "mesh_label": "Triple Negative Breast Neoplasms",
+    "tree_numbers": []
+  },
+  "acute myeloid leukemia": {
+    "exists": true,
+    "mesh_id": "68050677",
+    "mesh_label": "Core Binding Factor Alpha 3 Subunit",
+    "tree_numbers": []
+  },
+  "cancer": {
+    "exists": true,
+    "mesh_id": "68065646",
+    "mesh_label": "Thyroid Carcinoma, Anaplastic",
+    "tree_numbers": []
+  },
+  "germline brca1/2 mutant breast tumors": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "repair-deficient tumors": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "brca-proficient": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "tumor": {
+    "exists": true,
+    "mesh_id": "68064249",
+    "mesh_label": "Securin",
+    "tree_numbers": []
+  },
+  "initiation of breast cancer": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "hypoxia": {
+    "exists": true,
+    "mesh_id": "68064799",
+    "mesh_label": "Hypoxia-Inducible Factor-Proline Dioxygenases",
+    "tree_numbers": []
+  },
+  "cancers with deficiencies": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "trib3-high malignancies": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "eobc": {
+    "exists": false,
+    "mesh_id": "",
+    "mesh_label": "",
+    "tree_numbers": []
+  },
+  "germline or somatic brca1/2": {
+    "exists": true,
+    "mesh_id": "68056685",
+    "mesh_label": "Costello Syndrome",
+    "tree_numbers": []
+  }
+}
